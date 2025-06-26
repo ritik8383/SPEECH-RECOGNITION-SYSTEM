@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Speech-to-Text System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f2f5;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 100vh;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        .container {
+            background-color: #ffffff;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+            max-width: 800px;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        h1 {
+            color: #1a202c;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .controls button {
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 1.1rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background-color 0.3s ease, transform 0.2s ease, box-shadow 0.2s ease;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            max-width: 200px;
+            margin: 0 auto;
+            display: block;
+        }
+        #startButton {
+            background-color: #4CAF50; /* Green */
+            color: white;
+            border: none;
+        }
+        #startButton:hover {
+            background-color: #45a049;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(76, 175, 80, 0.3);
+        }
+        #stopButton {
+            background-color: #f44336; /* Red */
+            color: white;
+            border: none;
+        }
+        #stopButton:hover {
+            background-color: #da190b;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(244, 67, 54, 0.3);
+        }
+        button:disabled {
+            background-color: #a0aec0;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+        textarea {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #cbd5e0;
+            border-radius: 8px;
+            font-size: 1rem;
+            color: #4a5568;
+            background-color: #edf2f7;
+            resize: vertical;
+            min-height: 200px;
+        }
+        .message {
+            padding: 12px;
+            border-radius: 8px;
+            margin-top: 10px;
+            font-size: 0.95rem;
+            color: #2d3748;
+            background-color: #e2e8f0;
+            border: 1px solid #cbd5e0;
+            text-align: center;
+        }
+        .error {
+            background-color: #fed7d7;
+            color: #c53030;
+            border-color: #fc8181;
+        }
+        .info {
+            background-color: #bee3f8;
+            color: #2a4365;
+            border-color: #90cdf4;
+        }
+        .success {
+            background-color: #c6f6d5;
+            color: #276749;
+            border-color: #68d391;
+        }
+        .status-area {
+            min-height: 30px; /* Ensure space for messages */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .button-group {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            margin-top: 15px;
+        }
+
+        @media (max-width: 640px) {
+            .container {
+                padding: 20px;
+            }
+            h1 {
+                font-size: 1.8rem;
+            }
+            .controls button {
+                font-size: 1rem;
+                padding: 10px 20px;
+            }
+            .button-group {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-3xl font-bold text-gray-800">Speech-to-Text System</h1>
+
+        <div class="button-group">
+            <button id="startButton">Start Listening</button>
+            <button id="stopButton" disabled>Stop Listening</button>
+        </div>
+
+        <div id="statusMessage" class="status-area">
+            <span class="message info">Click "Start Listening" to begin.</span>
+        </div>
+
+        <div>
+            <label for="transcriptionOutput" class="block text-sm font-medium text-gray-700 mb-2">Transcription:</label>
+            <textarea id="transcriptionOutput" placeholder="Your transcribed text will appear here..." readonly
+                      class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"></textarea>
+        </div>
+    </div>
+
+    <script type="module">
+        // Import Firebase modules (boilerplate for Canvas apps, not directly used for speech-to-text here)
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // DOM elements
+        const startButton = document.getElementById('startButton');
+        const stopButton = document.getElementById('stopButton');
+        const transcriptionOutput = document.getElementById('transcriptionOutput');
+        const statusMessage = document.getElementById('statusMessage');
+
+        // Firebase Initialization (using global variables provided by Canvas)
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+
+        let app;
+        let auth;
+        let db;
+        let userId = 'anonymous'; // Default userId
+
+        // Speech Recognition API
+        let recognition;
+        let isListening = false;
+
+        // Function to display messages to the user
+        function displayStatus(msg, type = 'info') {
+            statusMessage.innerHTML = `<span class="message ${type}">${msg}</span>`;
+        }
+
+        // Initialize Firebase and authenticate (boilerplate)
+        async function initializeFirebaseAndAuth() {
+            try {
+                if (Object.keys(firebaseConfig).length === 0) {
+                    console.warn("Firebase config not found. Running without Firebase.");
+                    return;
+                }
+
+                app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+
+                // Authenticate user
+                if (typeof __initial_auth_token !== 'undefined') {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+                userId = auth.currentUser?.uid || crypto.randomUUID();
+                console.log("Firebase initialized. User ID:", userId);
+            } catch (error) {
+                console.error("Error initializing Firebase or authenticating:", error);
+                displayStatus(`Error setting up Firebase: ${error.message}.`, 'error');
+            }
+        }
+
+        // Call Firebase initialization
+        initializeFirebaseAndAuth();
+
+        // Check for Web Speech API browser compatibility
+        if ('webkitSpeechRecognition' in window) {
+            recognition = new webkitSpeechRecognition();
+            recognition.continuous = true; // Keep listening even if there's a pause
+            recognition.interimResults = true; // Show results even if they're not final
+            recognition.lang = 'en-US'; // Set default language
+
+            // Event handler for when speech is recognized
+            recognition.onresult = (event) => {
+                let interimTranscript = '';
+                let finalTranscript = '';
+
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    const transcript = event.results[i][0].transcript;
+                    if (event.results[i].isFinal) {
+                        finalTranscript += transcript;
+                    } else {
+                        interimTranscript += transcript;
+                    }
+                }
+                transcriptionOutput.value = finalTranscript + interimTranscript;
+            };
+
+            // Event handler for when the recognition service starts
+            recognition.onstart = () => {
+                isListening = true;
+                startButton.disabled = true;
+                stopButton.disabled = false;
+                displayStatus('Listening... Speak now.', 'info');
+            };
+
+            // Event handler for when the recognition service ends (e.g., due to silence or stop button)
+            recognition.onend = () => {
+                isListening = false;
+                startButton.disabled = false;
+                stopButton.disabled = true;
+                displayStatus('Stopped listening. Click "Start Listening" to restart.', 'info');
+            };
+
+            // Event handler for errors
+            recognition.onerror = (event) => {
+                isListening = false;
+                startButton.disabled = false;
+                stopButton.disabled = true;
+                console.error('Speech recognition error:', event.error);
+                if (event.error === 'not-allowed') {
+                    displayStatus('Permission denied. Please allow microphone access in your browser settings.', 'error');
+                } else if (event.error === 'no-speech') {
+                    displayStatus('No speech detected. Please try again.', 'error');
+                } else {
+                    displayStatus(`Error: ${event.error}. Please try again.`, 'error');
+                }
+            };
+
+            // Event listener for Start button
+            startButton.addEventListener('click', () => {
+                if (!isListening) {
+                    transcriptionOutput.value = ''; // Clear previous transcription
+                    recognition.start();
+                }
+            });
+
+            // Event listener for Stop button
+            stopButton.addEventListener('click', () => {
+                if (isListening) {
+                    recognition.stop();
+                }
+            });
+
+        } else {
+            // Browser does not support Web Speech API
+            startButton.disabled = true;
+            stopButton.disabled = true;
+            displayStatus('Web Speech API is not supported by your browser. Please use Chrome for this feature.', 'error');
+        }
+    </script>
+</body>
+</html>
